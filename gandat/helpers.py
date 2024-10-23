@@ -25,7 +25,24 @@ class UniversalDataUpsampler:
                  learning_rate: float = 0.0002,
                  beta_1: float = 0.5,
                  random_state: int = 42):
-        """Initialize the UniversalDataUpsampler."""
+        """
+        Initialize the UniversalDataUpsampler.
+
+        Parameters:
+        -----------
+        latent_dim : int
+            Dimension of the latent space for the generator
+        generator_layers : list, optional
+            List of layer sizes for the generator
+        discriminator_layers : list, optional
+            List of layer sizes for the discriminator
+        learning_rate : float
+            Learning rate for Adam optimizer
+        beta_1 : float
+            Beta1 parameter for Adam optimizer
+        random_state : int
+            Random seed for reproducibility
+        """
         self.latent_dim = latent_dim
         self.learning_rate = learning_rate
         self.beta_1 = beta_1
@@ -44,10 +61,26 @@ class UniversalDataUpsampler:
         self.date_min = {}
         self.date_max = {}
 
+        # Set random seeds
+        tf.random.set_seed(random_state)
+        np.random.seed(random_state)
+
         self.is_fitted = False
+        self.input_dim = None
 
     def _detect_column_types(self, df: pd.DataFrame) -> Dict:
-        """Detect the type of each column in the dataframe."""
+        """
+        Detect the type of each column in the dataframe.
+
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            Input dataframe
+
+        Returns:
+        --------
+        dict : Dictionary mapping column names to their detected types
+        """
         column_types = {}
 
         for column in df.columns:
@@ -87,7 +120,24 @@ class UniversalDataUpsampler:
                            column: str,
                            column_type: str,
                            fit: bool = False) -> np.ndarray:
-        """Preprocess a single column based on its type."""
+        """
+        Preprocess a single column based on its type.
+
+        Parameters:
+        -----------
+        series : pandas.Series
+            Column data to preprocess
+        column : str
+            Column name
+        column_type : str
+            Type of the column
+        fit : bool
+            Whether to fit the preprocessors
+
+        Returns:
+        --------
+        numpy.ndarray : Preprocessed column data
+        """
         if column_type == 'continuous':
             if fit:
                 return self.continuous_scaler.fit_transform(series.values.reshape(-1, 1))
@@ -124,7 +174,22 @@ class UniversalDataUpsampler:
                             data: np.ndarray,
                             column: str,
                             column_type: str) -> pd.Series:
-        """Convert preprocessed data back to original format."""
+        """
+        Convert preprocessed data back to original format.
+
+        Parameters:
+        -----------
+        data : numpy.ndarray
+            Preprocessed data
+        column : str
+            Column name
+        column_type : str
+            Type of the column
+
+        Returns:
+        --------
+        pandas.Series : Postprocessed column data
+        """
         if column_type == 'continuous':
             return pd.Series(
                 self.continuous_scaler.inverse_transform(data).flatten(),
@@ -157,7 +222,20 @@ class UniversalDataUpsampler:
     def _preprocess_data(self,
                          df: pd.DataFrame,
                          fit: bool = False) -> np.ndarray:
-        """Preprocess all columns in the dataframe."""
+        """
+        Preprocess all columns in the dataframe.
+
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            Input dataframe
+        fit : bool
+            Whether to fit the preprocessors
+
+        Returns:
+        --------
+        numpy.ndarray : Preprocessed data
+        """
         processed_columns = []
 
         if fit:
@@ -175,7 +253,18 @@ class UniversalDataUpsampler:
         return np.hstack(processed_columns)
 
     def _postprocess_data(self, data: np.ndarray) -> pd.DataFrame:
-        """Convert preprocessed data back to original format."""
+        """
+        Convert preprocessed data back to original format.
+
+        Parameters:
+        -----------
+        data : numpy.ndarray
+            Preprocessed data
+
+        Returns:
+        --------
+        pandas.DataFrame : Postprocessed data
+        """
         start_idx = 0
         processed_columns = []
 
@@ -193,22 +282,90 @@ class UniversalDataUpsampler:
 
         return pd.concat(processed_columns, axis=1)
 
-    def _get_input_dim(self, df: pd.DataFrame) -> int:
-        """Calculate total dimension after preprocessing."""
-        dim = 0
-        for column, column_type in self.column_types.items():
-            if column_type == 'categorical':
-                dim += self.categorical_dims[column]
-            else:
-                dim += 1
-        return dim
+    def _initialize_gan(self):
+        """Initialize the GAN architecture."""
+        # Build and compile discriminator
+        self.discriminator = self._build_discriminator()
+        self.discriminator.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate, beta_1=self.beta_1),
+            loss='binary_crossentropy',
+            metrics=['accuracy']
+        )
+
+        # Build generator
+        self.generator = self._build_generator()
+
+        # Build combined model
+        self.discriminator.trainable = False
+        self.combined = models.Sequential([self.generator, self.discriminator])
+        self.combined.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate, beta_1=self.beta_1),
+            loss='binary_crossentropy'
+        )
+
+    def _build_generator(self) -> models.Sequential:
+        """Build the generator network."""
+        model = models.Sequential()
+
+        # First layer
+        model.add(layers.Dense(self.generator_layers[0], input_dim=self.latent_dim))
+        model.add(layers.LeakyReLU(alpha=0.2))
+        model.add(layers.BatchNormalization())
+
+        # Hidden layers
+        for layer_size in self.generator_layers[1:]:
+            model.add(layers.Dense(layer_size))
+            model.add(layers.LeakyReLU(alpha=0.2))
+            model.add(layers.BatchNormalization())
+
+        # Output layer
+        model.add(layers.Dense(self.input_dim, activation='tanh'))
+
+        return model
+
+    def _build_discriminator(self) -> models.Sequential:
+        """Build the discriminator network."""
+        model = models.Sequential()
+
+        # First layer
+        model.add(layers.Dense(self.discriminator_layers[0], input_dim=self.input_dim))
+        model.add(layers.LeakyReLU(alpha=0.2))
+        model.add(layers.Dropout(0.3))
+
+        # Hidden layers
+        for layer_size in self.discriminator_layers[1:]:
+            model.add(layers.Dense(layer_size))
+            model.add(layers.LeakyReLU(alpha=0.2))
+            model.add(layers.Dropout(0.3))
+
+        # Output layer
+        model.add(layers.Dense(1, activation='sigmoid'))
+
+        return model
 
     def fit(self,
             data: Union[pd.DataFrame, np.ndarray],
             epochs: int = 2000,
             batch_size: int = 32,
             verbose: bool = True) -> Dict:
-        """Fit the model to the data."""
+        """
+        Fit the model to the data.
+
+        Parameters:
+        -----------
+        data : pandas.DataFrame or numpy.ndarray
+            Training data
+        epochs : int
+            Number of training epochs
+        batch_size : int
+            Size of training batches
+        verbose : bool
+            Whether to print training progress
+
+        Returns:
+        --------
+        dict : Training history
+        """
         # Convert to DataFrame if necessary
         if isinstance(data, np.ndarray):
             data = pd.DataFrame(data)
@@ -261,7 +418,18 @@ class UniversalDataUpsampler:
         return history
 
     def generate_samples(self, n_samples: int) -> pd.DataFrame:
-        """Generate new synthetic samples."""
+        """
+        Generate new synthetic samples.
+
+        Parameters:
+        -----------
+        n_samples : int
+            Number of samples to generate
+
+        Returns:
+        --------
+        pandas.DataFrame : Generated samples
+        """
         if not self.is_fitted:
             raise ValueError("Model must be fitted before generating samples")
 
