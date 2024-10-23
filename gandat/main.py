@@ -1,38 +1,34 @@
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras import layers, models
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-import pandas as pd
-from typing import Union, Tuple, Optional, Dict
-
-
-
-
-
 # Example usage
 if __name__ == "__main__":
-    # Create sample data
+    # Create sample data with multiple types
     np.random.seed(42)
-    X = np.random.randn(1000, 10)  # 1000 samples, 10 features
+
+    sample_data = pd.DataFrame({
+        'continuous': np.random.normal(0, 1, 1000),
+        'discrete': np.random.randint(0, 100, 1000),
+        'categorical': np.random.choice(['A', 'B', 'C'], 1000),
+        'boolean': np.random.choice([True, False], 1000),
+        'datetime': pd.date_range('2023-01-01', periods=1000, freq='D')
+    })
 
     # Initialize and fit the upsampler
-    upsampler = DataUpsampler(
+    upsampler = UniversalDataUpsampler(
         latent_dim=50,
         generator_layers=[128, 256, 512],
         discriminator_layers=[512, 256, 128],
-        scaler_type='standard',
         random_state=42
     )
 
     # Fit the model
-    history = upsampler.fit(X, epochs=2000, batch_size=32, verbose=True)
+    history = upsampler.fit(sample_data, epochs=2000, batch_size=32, verbose=True)
 
     # Generate new samples
     synthetic_samples = upsampler.generate_samples(n_samples=500)
 
     # Upsample to specific size
-    upsampled_data = upsampler.upsample_to_size(X, target_size=1500)
+    upsampled_data = upsampler.upsample_to_size(sample_data, target_size=1500)
 
-    print(f"Original data shape: {X.shape}")
-    print(f"Synthetic samples shape: {synthetic_samples.shape}")
-    print(f"Upsampled data shape: {upsampled_data.shape}")
+    print("\nOriginal Data Types:")
+    print(sample_data.dtypes)
+    print("\nSynthetic Data Types:")
+    print(synthetic_samples.dtypes)
